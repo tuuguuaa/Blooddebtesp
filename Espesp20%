@@ -1,0 +1,263 @@
+-- Blood Debt FULL ESP + Rayfield GUI (2026 Updated)
+-- Roles: Killer (Red), Sheriff/Vigilante (Blue), Target (Purple), Bystander (Green), Default (White)
+
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+
+local Window = Rayfield:CreateWindow({
+    Name = "Blood Debt Full ESP",
+    LoadingTitle = "Blood Debt Full ESP",
+    LoadingSubtitle = "Complete Visuals • Role Detection",
+    ConfigurationSaving = { Enabled = true, FolderName = "BloodDebtFullESP", FileName = "Config" },
+    KeySystem = false
+})
+
+local MainTab = Window:CreateTab("Main", 4483362458)
+local VisualsTab = Window:CreateTab("Visuals", 4483362458)
+local SettingsTab = Window:CreateTab("Settings", 4483362458)
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+local Camera = Workspace.CurrentCamera
+local LocalPlayer = Players.LocalPlayer
+
+local ESPEnabled = true
+local ESPObjects = {}
+local Connections = {}
+
+local Settings = {
+    ShowBoxes = true,
+    ShowTracers = true,
+    ShowHealth = true,
+    ShowNames = true,
+    ShowDistance = true,
+    ShowSkeleton = false,
+    ShowChams = false,
+    ShowRole = true,
+    BoxThickness = 2,
+    TracerThickness = 1.5,
+    TextSize = 15,
+    MaxDistance = 600,
+    KillerColor = Color3.fromRGB(255, 0, 0),
+    SheriffColor = Color3.fromRGB(0, 120, 255),
+    TargetColor = Color3.fromRGB(180, 0, 255),
+    BystanderColor = Color3.fromRGB(0, 255, 100),
+    DefaultColor = Color3.fromRGB(255, 255, 255)
+}
+
+local function getRole(player)
+    if not player or not player.Character then return "Unknown" end
+    local char = player.Character
+    if not char:FindFirstChild("Humanoid") then return "Unknown" end
+
+    -- Sheriff / Vigilante detection (spawn with gun)
+    for _, tool in ipairs(char:GetChildren()) do
+        if tool:IsA("Tool") then
+            local name = tool.Name:lower()
+            if name:find("gun") or name:find("pistol") or name:find("revolver") or name:find("rifle") or name:find("sheriff") or name:find("vigilante") then
+                return "Sheriff"  -- or Vigilante in some modes
+            end
+        end
+    end
+
+    -- Killer detection (equipment, marks, or special tools)
+    if char:FindFirstChild("Killer") or char:FindFirstChild("TargetMark") or char:FindFirstChildWhichIsA("Highlight") then
+        return "Killer"
+    end
+    for _, item in ipairs(char:GetChildren()) do
+        local n = item.Name:lower()
+        if n:find("knife") or n:find("throw") or n:find("soundmaker") or n:find("ngo") then
+            return "Killer"
+        end
+    end
+
+    -- Target detection (special bystander)
+    if char:FindFirstChild("Target") or char:FindFirstChild("DebtTarget") then
+        return "Target"
+    end
+
+    -- Fallback
+    if player.Team and (player.Team.Name:lower():find("bystander") or player.Team.Name:lower():find("innocent")) then
+        return "Bystander"
+    end
+
+    return "Player"
+end
+
+local function createESP(player)
+    if player == LocalPlayer then return end
+
+    local box = Drawing.new("Square")
+    box.Filled = false
+    box.Transparency = 0.85
+
+    local tracer = Drawing.new("Line")
+    tracer.Transparency = 0.8
+
+    local healthOutline = Drawing.new("Square")
+    healthOutline.Filled = false
+    healthOutline.Color = Color3.new(0,0,0)
+
+    local healthBar = Drawing.new("Square")
+    healthBar.Filled = true
+    healthBar.Transparency = 0.9
+
+    local nameTag = Drawing.new("Text")
+    nameTag.Center = true
+    nameTag.Outline = true
+    nameTag.Transparency = 1
+
+    local distanceTag = Drawing.new("Text")
+    distanceTag.Center = true
+    distanceTag.Outline = true
+    distanceTag.Transparency = 1
+    distanceTag.Size = 14
+
+    local espTable = {
+        box = box, tracer = tracer, healthBar = healthBar, healthOutline = healthOutline,
+        nameTag = nameTag, distanceTag = distanceTag
+    }
+    ESPObjects[player] = espTable
+
+    local conn = RunService.RenderStepped:Connect(function()
+        if not ESPEnabled or not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then
+            for _, v in pairs(espTable) do v.Visible = false end
+            return
+        end
+
+        local root = player.Character.HumanoidRootPart
+        local hum = player.Character.Humanoid
+        if hum.Health <= 0 then
+            for _, v in pairs(espTable) do v.Visible = false end
+            return
+        end
+
+        local dist = (root.Position - Camera.CFrame.Position).Magnitude
+        if dist > Settings.MaxDistance then
+            for _, v in pairs(espTable) do v.Visible = false end
+            return
+        end
+
+        local role = getRole(player)
+        local color = Settings.DefaultColor
+        if role == "Killer" then color = Settings.KillerColor
+        elseif role == "Sheriff" then color = Settings.SheriffColor
+        elseif role == "Target" then color = Settings.TargetColor
+        elseif role == "Bystander" then color = Settings.BystanderColor end
+
+        local rootPos, onScreen = Camera:WorldToViewportPoint(root.Position)
+        if not onScreen then
+            for _, v in pairs(espTable) do v.Visible = false end
+            return
+        end
+
+        local headPos = Camera:WorldToViewportPoint(root.Position + Vector3.new(0, 2.8, 0))
+        local legPos = Camera:WorldToViewportPoint(root.Position - Vector3.new(0, 3.2, 0))
+        local boxHeight = math.abs(headPos.Y - legPos.Y) * 1.15
+        local boxWidth = boxHeight * 0.55
+
+        -- Box
+        if Settings.ShowBoxes then
+            box.Size = Vector2.new(boxWidth, boxHeight)
+            box.Position = Vector2.new(rootPos.X - boxWidth/2, rootPos.Y - boxHeight/2)
+            box.Color = color
+            box.Thickness = Settings.BoxThickness
+            box.Visible = true
+        else box.Visible = false end
+
+        -- Tracer
+        if Settings.ShowTracers then
+            tracer.From = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y - 30)
+            tracer.To = Vector2.new(rootPos.X, rootPos.Y)
+            tracer.Color = color
+            tracer.Thickness = Settings.TracerThickness
+            tracer.Visible = true
+        else tracer.Visible = false end
+
+        -- Health Bar
+        if Settings.ShowHealth then
+            local pct = hum.Health / hum.MaxHealth
+            local barH = boxHeight * pct
+            healthOutline.Size = Vector2.new(6, boxHeight)
+            healthOutline.Position = Vector2.new(rootPos.X - boxWidth/2 - 12, rootPos.Y - boxHeight/2)
+            healthOutline.Visible = true
+
+            healthBar.Size = Vector2.new(4, barH)
+            healthBar.Position = Vector2.new(rootPos.X - boxWidth/2 - 11, rootPos.Y - boxHeight/2 + (boxHeight - barH))
+            healthBar.Color = Color3.fromHSV(pct * 0.33, 1, 1)
+            healthBar.Visible = true
+        else
+            healthBar.Visible = false
+            healthOutline.Visible = false
+        end
+
+        -- Name Tag
+        if Settings.ShowNames then
+            local roleTxt = Settings.ShowRole and ("[" .. role .. "] ") or ""
+            nameTag.Text = roleTxt .. player.Name
+            nameTag.Position = Vector2.new(rootPos.X, rootPos.Y - boxHeight/2 - 22)
+            nameTag.Color = color
+            nameTag.Size = Settings.TextSize
+            nameTag.Visible = true
+        else nameTag.Visible = false end
+
+        -- Distance
+        if Settings.ShowDistance then
+            distanceTag.Text = string.format("%.0f stud", dist)
+            distanceTag.Position = Vector2.new(rootPos.X, rootPos.Y + boxHeight/2 + 5)
+            distanceTag.Color = color
+            distanceTag.Visible = true
+        else distanceTag.Visible = false end
+    end)
+
+    table.insert(Connections, conn)
+
+    player.CharacterRemoving:Connect(function()
+        for _, obj in pairs(espTable) do if obj then obj:Remove() end end
+        ESPObjects[player] = nil
+    end)
+end
+
+-- Apply to all players
+for _, plr in ipairs(Players:GetPlayers()) do
+    createESP(plr)
+end
+Players.PlayerAdded:Connect(createESP)
+
+-- GUI
+MainTab:CreateToggle({Name = "Master ESP Toggle", CurrentValue = true, Callback = function(v) ESPEnabled = v end})
+MainTab:CreateKeybind({Name = "Toggle Hotkey", CurrentKeybind = "Insert", Callback = function() 
+    ESPEnabled = not ESPEnabled 
+    Rayfield:Notify({Title = "Blood Debt ESP", Content = "ESP " .. (ESPEnabled and "ON" or "OFF"), Duration = 2})
+end})
+
+VisualsTab:CreateToggle({Name = "Boxes", CurrentValue = true, Callback = function(v) Settings.ShowBoxes = v end})
+VisualsTab:CreateToggle({Name = "Tracers", CurrentValue = true, Callback = function(v) Settings.ShowTracers = v end})
+VisualsTab:CreateToggle({Name = "Health Bars", CurrentValue = true, Callback = function(v) Settings.ShowHealth = v end})
+VisualsTab:CreateToggle({Name = "Name Tags", CurrentValue = true, Callback = function(v) Settings.ShowNames = v end})
+VisualsTab:CreateToggle({Name = "Distance Tags", CurrentValue = true, Callback = function(v) Settings.ShowDistance = v end})
+VisualsTab:CreateToggle({Name = "Show Role Text", CurrentValue = true, Callback = function(v) Settings.ShowRole = v end})
+
+VisualsTab:CreateSlider({Name = "Box Thickness", Range = {1,6}, Increment = 0.5, CurrentValue = 2, Callback = function(v) Settings.BoxThickness = v end})
+VisualsTab:CreateSlider({Name = "Tracer Thickness", Range = {1,4}, Increment = 0.5, CurrentValue = 1.5, Callback = function(v) Settings.TracerThickness = v end})
+VisualsTab:CreateSlider({Name = "Text Size", Range = {12,20}, Increment = 1, CurrentValue = 15, Callback = function(v) Settings.TextSize = v end})
+VisualsTab:CreateSlider({Name = "Max Distance", Range = {100,1200}, Increment = 50, CurrentValue = 600, Callback = function(v) Settings.MaxDistance = v end})
+
+VisualsTab:CreateColorPicker({Name = "Killer Color", Color = Settings.KillerColor, Callback = function(v) Settings.KillerColor = v end})
+VisualsTab:CreateColorPicker({Name = "Sheriff/Vigilante Color", Color = Settings.SheriffColor, Callback = function(v) Settings.SheriffColor = v end})
+VisualsTab:CreateColorPicker({Name = "Target Color", Color = Settings.TargetColor, Callback = function(v) Settings.TargetColor = v end})
+VisualsTab:CreateColorPicker({Name = "Bystander Color", Color = Settings.BystanderColor, Callback = function(v) Settings.BystanderColor = v end})
+VisualsTab:CreateColorPicker({Name = "Default Color", Color = Settings.DefaultColor, Callback = function(v) Settings.DefaultColor = v end})
+
+SettingsTab:CreateButton({Name = "Unload ESP Completely", Callback = function()
+    ESPEnabled = false
+    for _, c in ipairs(Connections) do c:Disconnect() end
+    for _, tbl in pairs(ESPObjects) do
+        for _, obj in pairs(tbl) do if obj then obj:Remove() end end
+    end
+    Rayfield:Destroy()
+    print("Blood Debt Full ESP unloaded.")
+end})
+
+print("✅ Blood Debt Full ESP loaded! Role detection improved for current Debt Mode.")
+Rayfield:Notify({Title = "Blood Debt Full ESP", Content = "Press Insert to toggle • Customize in tabs • Play responsibly", Duration = 6})
